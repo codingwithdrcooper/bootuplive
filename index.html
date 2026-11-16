@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>BootUp Byte Snake</title>
+<style>
+  :root { --y:#FFD400; --y2:#FFB800; --dim:#5a4a00; --bg:#0a0a0a; --panel:#141414; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { height:100%; background:var(--bg); color:var(--y); font-family:"Courier New",ui-monospace,monospace; overflow:hidden; touch-action:none; }
+  body { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:12px;
+    background-image: linear-gradient(rgba(255,212,0,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,212,0,.04) 1px, transparent 1px);
+    background-size: 24px 24px; }
+  header { text-align:center; }
+  h1 { font-size:clamp(22px,5vw,38px); letter-spacing:4px; text-shadow:0 0 12px rgba(255,212,0,.6); }
+  h1 span { background:var(--y); color:#000; padding:0 8px; }
+  .sub { font-size:12px; opacity:.7; letter-spacing:2px; margin-top:4px; }
+  .hud { display:flex; gap:18px; font-size:14px; flex-wrap:wrap; justify-content:center; }
+  .hud b { color:#fff; }
+  .bar { width:min(92vw,560px); height:14px; border:2px solid var(--y); position:relative; }
+  .bar i { position:absolute; inset:0; width:0%; background:repeating-linear-gradient(45deg,var(--y) 0 8px,var(--y2) 8px 16px); transition:width .2s; }
+  .bar em { position:absolute; inset:0; font-size:10px; font-style:normal; color:#000; mix-blend-mode:difference; filter:invert(1); text-align:center; line-height:10px; font-weight:bold; }
+  .wrap { position:relative; border:3px solid var(--y); box-shadow:0 0 24px rgba(255,212,0,.35), inset 0 0 24px rgba(255,212,0,.1); }
+  canvas { display:block; background:#050505; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background:rgba(0,0,0,.82); gap:10px; padding:20px; }
+  .overlay.hidden { display:none; }
+  .overlay h2 { font-size:clamp(20px,4vw,30px); letter-spacing:3px; }
+  .overlay p { font-size:13px; line-height:1.6; opacity:.9; max-width:380px; }
+  .term { text-align:left; font-size:12px; color:var(--y); opacity:.85; min-height:90px; white-space:pre; }
+  button { font-family:inherit; font-weight:bold; font-size:16px; letter-spacing:2px; background:var(--y); color:#000; border:none; padding:10px 22px; cursor:pointer; box-shadow:4px 4px 0 #000, 4px 4px 0 2px var(--y); }
+  button:hover { background:#fff; }
+  button:active { transform:translate(2px,2px); box-shadow:2px 2px 0 #000; }
+  .pad { display:none; grid-template-columns:repeat(3,56px); grid-template-rows:repeat(2,56px); gap:6px; }
+  .pad button { padding:0; font-size:22px; box-shadow:none; border:2px solid #000; }
+  .pad .u { grid-column:2; } .pad .l { grid-column:1; grid-row:2; } .pad .d { grid-column:2; grid-row:2; } .pad .r { grid-column:3; grid-row:2; }
+  @media (hover:none) { .pad { display:grid; } }
+  footer { font-size:11px; opacity:.55; letter-spacing:1px; text-align:center; }
+  .legend { display:flex; gap:14px; font-size:11px; opacity:.8; flex-wrap:wrap; justify-content:center; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>BOOT</span>UP · BYTE SNAKE</h1>
+  <div class="sub">BOOTUP PGH @ COMMUNITY FORGE · WILKINSBURG, PA</div>
+</header>
+
+<div class="hud">
+  <div>SCORE <b id="score">0</b></div>
+  <div>STAGE <b id="stage">BIOS</b></div>
+  <div>HI <b id="hi">0</b></div>
+</div>
+<div class="bar"><i id="prog"></i><em id="progtxt">BOOTING 0%</em></div>
+
+<div class="wrap">
+  <canvas id="c"></canvas>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">&gt; POWER ON_</h2>
+    <div class="term" id="term"></div>
+    <p id="ovMsg">You're a data cable. Eat <b>bytes</b> to boot the system.<br>Grab <b>⚡ chips</b> for bonus points. Dodge <b>bugs</b>, walls, and yourself.<br>Arrows / WASD to steer · Space to pause</p>
+    <button id="go">PRESS START</button>
+  </div>
+</div>
+
+<div class="legend"><span>■ byte +10</span><span>⚡ chip +50</span><span>✱ bug = crash</span></div>
+
+<div class="pad">
+  <button class="u" data-d="up">▲</button>
+  <button class="l" data-d="left">◀</button>
+  <button class="d" data-d="down">▼</button>
+  <button class="r" data-d="right">▶</button>
+</div>
+
+<footer>Technology education for local youth in Pittsburgh · forge.community</footer>
+
+<script>
+(() => {
+  const Y = '#FFD400', Y2 = '#FFB800', DIM = '#3a3000';
+  const STAGES = ['BIOS','KERNEL','DRIVERS','NETWORK','DESKTOP','ONLINE'];
+  const PER_STAGE = 8;
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  const $ = id => document.getElementById(id);
+  let COLS = 24, ROWS = 20, CELL = 24;
+
+  function size() {
+    const maxW = Math.min(window.innerWidth - 30, 560);
+    const maxH = window.innerHeight - 300;
+    CELL = Math.max(12, Math.floor(Math.min(maxW / COLS, Math.max(maxH, 240) / ROWS)));
+    cv.width = COLS * CELL; cv.height = ROWS * CELL;
+    $('prog').parentElement.style.width = cv.width + 6 + 'px';
+    draw();
+  }
+
+  let snake, dir, nextDirs, food, chip, bugs, score, eaten, tick, speed, running, paused, dead, particles, flash, t0;
+  let hi = 0;
+  try { hi = +localStorage.getItem('bootup-snake-hi') || 0; } catch(e) {}
+  $('hi').textContent = hi;
+
+  function reset() {
+    snake = [{x:6,y:10},{x:5,y:10},{x:4,y:10}];
+    dir = {x:1,y:0}; nextDirs = [];
+    score = 0; eaten = 0; speed = 130; bugs = []; chip = null; particles = []; flash = 0;
+    dead = false; paused = false;
+    food = freeCell();
+    updateHud();
+  }
+
+  function freeCell() {
+    for (let i = 0; i < 500; i++) {
+      const c = {x: Math.floor(Math.random()*COLS), y: Math.floor(Math.random()*ROWS)};
+      if (occupied(c.x, c.y)) continue;
+      const h = snake[0];
+      if (Math.abs(c.x-h.x) + Math.abs(c.y-h.y) < 4) continue;
+      return c;
+    }
+    return {x:0,y:0};
+  }
+  function occupied(x,y) {
+    return snake.some(s=>s.x===x&&s.y===y) || bugs.some(b=>b.x===x&&b.y===y) ||
+      (food && food.x===x && food.y===y) || (chip && chip.x===x && chip.y===y);
+  }
+
+  function stageIdx() { return Math.min(STAGES.length-1, Math.floor(eaten / PER_STAGE)); }
+
+  function updateHud() {
+    $('score').textContent = score;
+    $('stage').textContent = STAGES[stageIdx()];
+    const pct = Math.min(100, Math.round(eaten / (PER_STAGE*(STAGES.length-1)) * 100));
+    $('prog').style.width = pct + '%';
+    $('progtxt').textContent = pct >= 100 ? 'SYSTEM ONLINE — KEEP GOING!' : 'BOOTING ' + pct + '%';
+  }
+
+  function burst(x,y,n,col) {
+    for (let i=0;i<n;i++) particles.push({x:(x+.5)*CELL, y:(y+.5)*CELL, vx:(Math.random()-.5)*6, vy:(Math.random()-.5)*6, life:1, col});
+  }
+
+  function step() {
+    if (nextDirs.length) dir = nextDirs.shift();
+    const h = snake[0];
+    const nh = {x:h.x+dir.x, y:h.y+dir.y};
+    if (nh.x<0||nh.y<0||nh.x>=COLS||nh.y>=ROWS) return crash('SEGFAULT: hit the wall');
+    if (snake.some((s,i)=>i<snake.length-1 && s.x===nh.x && s.y===nh.y)) return crash('INFINITE LOOP: ate your own tail');
+    if (bugs.some(b=>b.x===nh.x&&b.y===nh.y)) return crash('UNHANDLED BUG: debug and try again');
+
+    snake.unshift(nh);
+    let grew = false;
+    if (nh.x===food.x && nh.y===food.y) {
+      const before = stageIdx();
+      score += 10; eaten++; grew = true;
+      burst(nh.x,nh.y,12,Y);
+      food = freeCell();
+      speed = Math.max(60, speed - 2.5);
+      if (stageIdx() > before) { flash = 1; spawnBug(); spawnBug(); }
+      if (!chip && Math.random() < .22) chip = {...freeCell(), ttl: 60};
+      if (eaten % 5 === 0) spawnBug();
+      updateHud();
+    } else if (chip && nh.x===chip.x && nh.y===chip.y) {
+      score += 50; grew = true; burst(nh.x,nh.y,24,'#fff'); chip = null; updateHud();
+    }
+    if (!grew) snake.pop();
+
+    if (chip && --chip.ttl <= 0) chip = null;
+    // bugs wander occasionally
+    bugs.forEach(b => {
+      if (Math.random() < .25) {
+        const ds = [[1,0],[-1,0],[0,1],[0,-1]][Math.floor(Math.random()*4)];
+        const nx=b.x+ds[0], ny=b.y+ds[1];
+        if (nx>=0&&ny>=0&&nx<COLS&&ny<ROWS && !occupied(nx,ny)) { b.x=nx; b.y=ny; }
+      }
+    });
+    if (bugs.some(b=>b.x===snake[0].x&&b.y===snake[0].y)) return crash('UNHANDLED BUG: debug and try again');
+  }
+
+  function spawnBug() { if (bugs.length < 10) bugs.push(freeCell()); }
+
+  function crash(reason) {
+    dead = true; running = false;
+    burst(snake[0].x, snake[0].y, 40, Y);
+    if (score > hi) { hi = score; try { localStorage.setItem('bootup-snake-hi', hi); } catch(e) {} $('hi').textContent = hi; }
+    setTimeout(() => {
+      $('ovTitle').textContent = '> SYSTEM CRASH';
+      $('term').textContent = `ERR  ${reason}\nLOG  score .......... ${score}\nLOG  bytes loaded ... ${eaten}\nLOG  reached ....... ${STAGES[stageIdx()]}\n${score>=hi&&score>0?'NEW  HIGH SCORE!':'HI   '+hi}`;
+      $('ovMsg').textContent = 'Every coder crashes. Reboot and try again!';
+      $('go').textContent = 'REBOOT';
+      $('ov').classList.remove('hidden');
+    }, 500);
+  }
+
+  // ---------- drawing ----------
+  function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x,y,w,h,r) : ctx.rect(x,y,w,h); }
+
+  function draw() {
+    if (!snake) return;
+    const t = performance.now()/1000;
+    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cv.width,cv.height);
+    // circuit-board grid
+    ctx.fillStyle = DIM;
+    for (let x=0;x<COLS;x++) for (let y=0;y<ROWS;y++) ctx.fillRect(x*CELL+CELL/2-1, y*CELL+CELL/2-1, 2, 2);
+    ctx.strokeStyle = 'rgba(255,212,0,.06)'; ctx.lineWidth = 1;
+    for (let x=0;x<=COLS;x+=4){ ctx.beginPath(); ctx.moveTo(x*CELL,0); ctx.lineTo(x*CELL,cv.height); ctx.stroke(); }
+    for (let y=0;y<=ROWS;y+=4){ ctx.beginPath(); ctx.moveTo(0,y*CELL); ctx.lineTo(cv.width,y*CELL); ctx.stroke(); }
+
+    if (flash > 0) { ctx.fillStyle = `rgba(255,212,0,${flash*.25})`; ctx.fillRect(0,0,cv.width,cv.height);
+      ctx.fillStyle = Y; ctx.font = `bold ${CELL*1.2}px Courier New`; ctx.textAlign='center';
+      ctx.globalAlpha = flash; ctx.fillText(STAGES[stageIdx()] + ' LOADED', cv.width/2, cv.height/2); ctx.globalAlpha = 1; flash -= .015; }
+
+    // byte (food) — a tiny chip with 0/1
+    const p = 1 + Math.sin(t*6)*.08, fs = CELL*.8*p, fx = food.x*CELL+(CELL-fs)/2, fy = food.y*CELL+(CELL-fs)/2;
+    ctx.shadowColor = Y; ctx.shadowBlur = 12;
+    ctx.fillStyle = Y; roundRect(fx,fy,fs,fs,3); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#000'; ctx.font = `bold ${CELL*.55}px Courier New`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText((food.x+food.y)%2?'1':'0', food.x*CELL+CELL/2, food.y*CELL+CELL/2+1);
+
+    // bonus chip
+    if (chip) {
+      const blink = chip.ttl < 15 && Math.floor(t*8)%2;
+      if (!blink) {
+        const cx = chip.x*CELL, cy = chip.y*CELL;
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+        for (let i=0;i<3;i++){ const o = CELL*(.25+i*.25);
+          ctx.beginPath(); ctx.moveTo(cx+o,cy); ctx.lineTo(cx+o,cy+CELL); ctx.stroke(); }
+        ctx.fillStyle = '#111'; ctx.fillRect(cx+CELL*.15, cy+CELL*.15, CELL*.7, CELL*.7);
+        ctx.strokeStyle = Y; ctx.strokeRect(cx+CELL*.15, cy+CELL*.15, CELL*.7, CELL*.7);
+        ctx.fillStyle = Y; ctx.font = `${CELL*.55}px sans-serif`; ctx.fillText('⚡', cx+CELL/2, cy+CELL/2+1);
+      }
+    }
+
+    // bugs
+    bugs.forEach((b,i) => {
+      const bx = b.x*CELL+CELL/2, by = b.y*CELL+CELL/2, r = CELL*.28, w = Math.sin(t*12+i)*2;
+      ctx.strokeStyle = Y2; ctx.lineWidth = 1.5;
+      for (const s of [-1,1]) for (const k of [-.6,0,.6]) {
+        ctx.beginPath(); ctx.moveTo(bx, by+k*r); ctx.lineTo(bx+s*(r*1.6), by+k*r*1.4+w*s); ctx.stroke(); }
+      ctx.fillStyle = '#000'; ctx.beginPath(); ctx.ellipse(bx,by,r,r*1.25,0,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle = Y; ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(bx-r,by); ctx.lineTo(bx+r,by); ctx.stroke();
+      ctx.fillStyle = Y; ctx.fillRect(bx-r*.5, by-r*.9, 2, 2); ctx.fillRect(bx+r*.3, by-r*.9, 2, 2);
+    });
+
+    // snake — ribbon cable with striped segments
+    for (let i = snake.length-1; i >= 0; i--) {
+      const s = snake[i], x = s.x*CELL, y = s.y*CELL, pad = i===0 ? 1 : 3;
+      ctx.fillStyle = i===0 ? Y : (i%2 ? Y : Y2);
+      if (dead) ctx.fillStyle = (Math.floor(t*10)+i)%2 ? '#333' : Y;
+      // connect to previous segment to look continuous
+      if (i < snake.length-1) {
+        const n = snake[i+1];
+        ctx.fillRect(Math.min(x,n.x*CELL)+pad, Math.min(y,n.y*CELL)+pad,
+          Math.abs(x-n.x*CELL)+CELL-pad*2, Math.abs(y-n.y*CELL)+CELL-pad*2);
+      }
+      roundRect(x+pad,y+pad,CELL-pad*2,CELL-pad*2, i===0?6:3); ctx.fill();
+      if (i>0 && i%3===0) { ctx.fillStyle='#000'; ctx.fillRect(x+CELL/2-1.5,y+CELL/2-1.5,3,3); }
+    }
+    // head: USB-ish plug + eyes
+    const h = snake[0], hx = h.x*CELL, hy = h.y*CELL;
+    ctx.fillStyle = '#000';
+    const ex = dir.x, ey = dir.y;
+    const e1 = {x: hx+CELL/2 + (ey? -CELL*.2 : ex*CELL*.15), y: hy+CELL/2 + (ex? -CELL*.2 : ey*CELL*.15)};
+    const e2 = {x: hx+CELL/2 + (ey?  CELL*.2 : ex*CELL*.15), y: hy+CELL/2 + (ex?  CELL*.2 : ey*CELL*.15)};
+    ctx.fillRect(e1.x-2,e1.y-2,4,4); ctx.fillRect(e2.x-2,e2.y-2,4,4);
+
+    // particles
+    particles = particles.filter(p => (p.life -= .03) > 0);
+    particles.forEach(p => { p.x+=p.vx; p.y+=p.vy; p.vx*=.94; p.vy*=.94;
+      ctx.globalAlpha = p.life; ctx.fillStyle = p.col; ctx.fillRect(p.x-2,p.y-2,4,4); });
+    ctx.globalAlpha = 1;
+
+    if (paused && running) {
+      ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillRect(0,0,cv.width,cv.height);
+      ctx.fillStyle=Y; ctx.font=`bold ${CELL*1.3}px Courier New`; ctx.textAlign='center';
+      ctx.fillText('|| PAUSED', cv.width/2, cv.height/2);
+    }
+  }
+
+  let last = 0, acc = 0;
+  function loop(ts) {
+    const dt = ts - (last || ts); last = ts;
+    if (running && !paused) { acc += dt; while (acc >= speed) { acc -= speed; step(); if (!running) break; } }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- boot sequence & input ----------
+  const bootLines = ['BOOTUP PGH BIOS v1.0','Checking memory ......... OK','Loading curiosity.sys .... OK','Mounting /community ...... OK','Ready.'];
+  function typeBoot() {
+    let i = 0; $('term').textContent = '';
+    const iv = setInterval(() => { if (i >= bootLines.length) return clearInterval(iv);
+      $('term').textContent += (i?'\n':'') + bootLines[i++]; }, 260);
+  }
+
+  function start() {
+    reset(); running = true; acc = 0;
+    $('ov').classList.add('hidden');
+  }
+  $('go').addEventListener('click', start);
+
+  function turn(d) {
+    const map = {up:{x:0,y:-1}, down:{x:0,y:1}, left:{x:-1,y:0}, right:{x:1,y:0}};
+    const nd = map[d]; if (!nd) return;
+    const ref = nextDirs.length ? nextDirs[nextDirs.length-1] : dir;
+    if (nd.x === -ref.x && nd.y === -ref.y) return;
+    if (nd.x === ref.x && nd.y === ref.y) return;
+    if (nextDirs.length < 3) nextDirs.push(nd);
+  }
+
+  document.addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    const m = {arrowup:'up',w:'up',arrowdown:'down',s:'down',arrowleft:'left',a:'left',arrowright:'right',d:'right'};
+    if (m[k]) { e.preventDefault(); if (running) turn(m[k]); }
+    if (k === ' ' || k === 'enter') { e.preventDefault();
+      if (!running) start(); else if (k === ' ') paused = !paused; }
+    if (k === 'p' && running) paused = !paused;
+  });
+
+  document.querySelectorAll('.pad button').forEach(b =>
+    b.addEventListener('pointerdown', e => { e.preventDefault(); if (!running) start(); else turn(b.dataset.d); }));
+
+  // swipe controls
+  let sx=null, sy=null;
+  cv.addEventListener('touchstart', e => { const t=e.touches[0]; sx=t.clientX; sy=t.clientY; }, {passive:true});
+  cv.addEventListener('touchend', e => {
+    if (sx===null) return; const t=e.changedTouches[0], dx=t.clientX-sx, dy=t.clientY-sy; sx=null;
+    if (Math.max(Math.abs(dx),Math.abs(dy)) < 20) { if (running) paused = !paused; return; }
+    turn(Math.abs(dx)>Math.abs(dy) ? (dx>0?'right':'left') : (dy>0?'down':'up'));
+  });
+
+  window.addEventListener('resize', size);
+  reset(); size(); typeBoot(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
